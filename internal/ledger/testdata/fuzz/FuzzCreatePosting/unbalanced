@@ -1,0 +1,7 @@
+go test fuzz v1
+string("USD")
+string("")
+string("a")
+int64(-2)
+string("b")
+int64(1)

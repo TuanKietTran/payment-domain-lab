@@ -1,0 +1,7 @@
+go test fuzz v1
+string("usd")
+string("  spaces  ")
+string(" a ")
+int64(-100)
+string(" b ")
+int64(100)

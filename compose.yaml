@@ -1,0 +1,49 @@
+services:
+  ledger:
+    build:
+      context: .
+      target: ledger-service
+    environment:
+      LEDGER_ADDR: :8081
+      LEDGER_AUTH_TOKEN: ${LEDGER_AUTH_TOKEN:-}
+    ports:
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  payment:
+    build:
+      context: .
+      target: payment-service
+    environment:
+      PAYMENT_ADDR: :8080
+      LEDGER_URL: http://ledger:8081
+      LEDGER_AUTH_TOKEN: ${LEDGER_AUTH_TOKEN:-}
+      PAYMENT_AUTH_TOKEN: ${PAYMENT_AUTH_TOKEN:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      ledger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

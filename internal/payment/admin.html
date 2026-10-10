@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payment Operations</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#667085; --line:#d0d5dd; --paper:#fff; --wash:#f4f7fb; --accent:#175cd3; --danger:#b42318; --success:#067647; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--wash); color:var(--ink); font:16px/1.5 system-ui,-apple-system,sans-serif; }
+    header, main { width:min(1120px, calc(100% - 2rem)); margin:auto; }
+    header { padding:2.5rem 0 1.25rem; }
+    h1, h2, p { margin-top:0; } h1 { margin-bottom:.35rem; } h2 { font-size:1.15rem; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:minmax(260px, 340px) 1fr; gap:1.25rem; align-items:start; }
+    .panel { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:1.25rem; box-shadow:0 1px 2px #1018280d; }
+    label { display:block; font-weight:650; margin:.9rem 0 .3rem; }
+    input { width:100%; min-height:44px; border:1px solid #98a2b3; border-radius:8px; padding:.65rem .75rem; font:inherit; }
+    input:focus, button:focus-visible { outline:3px solid #84adff; outline-offset:2px; }
+    button { min-height:42px; border:0; border-radius:8px; padding:.55rem .85rem; background:var(--accent); color:white; font:600 .94rem/1 system-ui,sans-serif; cursor:pointer; }
+    button.secondary { background:#344054; } button.danger { background:var(--danger); }
+    button:disabled { cursor:not-allowed; opacity:.55; }
+    form > button { margin-top:1rem; width:100%; }
+    .toolbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+    .toolbar h2 { margin:0; }
+    #result { margin:0 0 1.25rem; border-left:5px solid var(--accent); }
+    #result.success { border-left-color:var(--success); } #result.error { border-left-color:var(--danger); }
+    #result pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.45 ui-monospace,monospace; }
+    #payments { display:grid; gap:.85rem; }
+    article { border:1px solid var(--line); border-radius:10px; padding:1rem; }
+    .payment-head { display:flex; justify-content:space-between; gap:.75rem; align-items:start; }
+    .payment-head h3 { margin:0; font-size:1rem; overflow-wrap:anywhere; }
+    .badge { flex:none; border-radius:999px; background:#eef4ff; color:#3538cd; padding:.18rem .55rem; font-size:.78rem; font-weight:700; }
+    dl { display:grid; grid-template-columns:max-content 1fr; gap:.25rem .75rem; margin:.7rem 0; } dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+    .actions { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.8rem; }
+    .refund { display:flex; gap:.5rem; width:100%; } .refund input { min-height:42px; max-width:180px; }
+    .empty { color:var(--muted); text-align:center; padding:2rem; }
+    @media (max-width:760px) { .grid { grid-template-columns:1fr; } header { padding-top:1.5rem; } .toolbar { align-items:flex-start; } }
+    @media (prefers-reduced-motion:no-preference) { button { transition:filter .15s, transform .15s; } button:hover:not(:disabled) { filter:brightness(.92); } button:active:not(:disabled) { transform:translateY(1px); } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Payment operations</h1>
+  <p class="muted">Create and move simulated payments through the ledger-backed lifecycle.</p>
+</header>
+<main>
+  <section id="result" class="panel" aria-live="polite" aria-atomic="true" hidden>
+    <h2 id="result-title">Result</h2><pre id="result-body"></pre>
+  </section>
+  <div class="grid">
+    <section class="panel" aria-labelledby="create-title">
+      <h2 id="create-title">Create payment</h2>
+      <form id="create-form">
+        <label for="amount">Amount <span class="muted">(minor units)</span></label>
+        <input id="amount" name="amount" inputmode="numeric" pattern="[0-9]+" required aria-describedby="amount-help">
+        <small id="amount-help" class="muted">For example, 1250 means 12.50 in a two-decimal currency.</small>
+        <label for="currency">Currency</label>
+        <input id="currency" name="currency" value="USD" minlength="3" maxlength="3" pattern="[A-Za-z]{3}" required autocapitalize="characters">
+        <label for="description">Description</label>
+        <input id="description" name="description" maxlength="200" placeholder="Order reference">
+        <button type="submit">Create payment</button>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="payments-title">
+      <div class="toolbar"><h2 id="payments-title">Payments</h2><button id="refresh" type="button" class="secondary">Refresh</button></div>
+      <form id="token-form">
+        <label for="token">API token <span class="muted">(only if the server requires one; kept for this tab session)</span></label>
+        <input id="token" name="token" type="password" autocomplete="off" aria-describedby="token-help">
+        <small id="token-help" class="muted">Stored only in this browser tab. Select Apply token after changing it.</small>
+        <button type="submit" class="secondary">Apply token</button>
+      </form>
+      <div id="payments" aria-busy="true"><p class="empty">Loading payments…</p></div>
+      <div class="actions"><button id="more" type="button" class="secondary" hidden>Load more</button></div>
+    </section>
+  </div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const paymentsEl = document.querySelector('#payments');
+  const resultEl = document.querySelector('#result');
+  const resultTitle = document.querySelector('#result-title');
+  const resultBody = document.querySelector('#result-body');
+  const tokenEl = document.querySelector('#token');
+  const refreshEl = document.querySelector('#refresh');
+  const moreEl = document.querySelector('#more');
+  let nextCursor = '';
+  try { tokenEl.value = sessionStorage.getItem('apiToken') || ''; } catch (_) {}
+  const key = () => self.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const escapeHTML = value => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+
+  function showResult(ok, title, value) {
+    resultEl.hidden = false;
+    resultEl.className = `panel ${ok ? 'success' : 'error'}`;
+    resultTitle.textContent = title;
+    resultBody.textContent = JSON.stringify(value, null, 2);
+    resultEl.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  async function request(path, options = {}) {
+    const token = tokenEl.value.trim();
+    if (token) options = {...options, headers:{...options.headers, Authorization:`Bearer ${token}`}};
+    const response = await fetch(path, options);
+    let body;
+    try { body = await response.json(); } catch (_) { body = {error:{code:'invalid_response', message:'Server returned a non-JSON response'}}; }
+    if (!response.ok) throw body;
+    return body;
+  }
+
+  function actionButton(payment, action, label, className = '') {
+    return `<button type="button" class="${className}" data-id="${escapeHTML(payment.id)}" data-action="${action}">${label}</button>`;
+  }
+
+  function paymentCard(payment) {
+    const remaining = payment.amount - payment.refunded_amount;
+    let actions = '';
+    if (payment.status === 'created') actions = actionButton(payment, 'authorize', 'Authorize') + actionButton(payment, 'cancel', 'Cancel', 'danger');
+    if (payment.status === 'authorized') actions = actionButton(payment, 'capture', 'Capture') + actionButton(payment, 'cancel', 'Cancel', 'danger');
+    if (payment.status === 'captured' || payment.status === 'partially_refunded') {
+      actions = `<div class="refund"><input aria-label="Refund amount in minor units for ${escapeHTML(payment.id)}" inputmode="numeric" pattern="[0-9]+" min="1" max="${remaining}" placeholder="Up to ${remaining}"><button type="button" data-id="${escapeHTML(payment.id)}" data-action="refund">Refund</button></div>`;
+    }
+    return `<article data-payment-id="${escapeHTML(payment.id)}">
+      <div class="payment-head"><h3>${escapeHTML(payment.description || payment.id)}</h3><span class="badge">${escapeHTML(payment.status.replaceAll('_', ' '))}</span></div>
+      <dl><dt>ID</dt><dd><code>${escapeHTML(payment.id)}</code></dd><dt>Amount</dt><dd>${escapeHTML(payment.amount)} ${escapeHTML(payment.currency)} minor units</dd><dt>Refunded</dt><dd>${escapeHTML(payment.refunded_amount)}</dd></dl>
+      <div class="actions" aria-label="Actions for ${escapeHTML(payment.id)}">${actions}</div>
+    </article>`;
+  }
+
+  async function loadPayments(append = false) {
+    if (!append) { nextCursor = ''; moreEl.hidden = true; }
+    paymentsEl.setAttribute('aria-busy', 'true');
+    refreshEl.disabled = true;
+    moreEl.disabled = true;
+    try {
+      const query = append && nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}` : '';
+      const body = await request(`/v1/payments${query}`);
+      nextCursor = body.next_cursor || '';
+      moreEl.hidden = !nextCursor;
+      const cards = body.payments.map(paymentCard).join('');
+      if (append) paymentsEl.insertAdjacentHTML('beforeend', cards);
+      else paymentsEl.innerHTML = cards || '<p class="empty">No payments yet.</p>';
+      if (resultTitle.textContent === 'Load failed') resultEl.hidden = true;
+    } catch (error) {
+      if (!paymentsEl.querySelector('article')) paymentsEl.innerHTML = '<p class="empty">Could not load payments.</p>';
+      showResult(false, 'Load failed', error);
+    } finally {
+      paymentsEl.setAttribute('aria-busy', 'false');
+      refreshEl.disabled = false;
+      moreEl.disabled = false;
+    }
+  }
+
+  document.querySelector('#create-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type=submit]');
+    const rawAmount = form.amount.value.trim();
+    if (!/^\d+$/.test(rawAmount) || rawAmount === '0' || Number(rawAmount) > Number.MAX_SAFE_INTEGER) {
+      showResult(false, 'Validation failed', {error:{code:'invalid_amount', message:'Enter a positive amount no larger than 9007199254740991.'}}); return;
+    }
+    submit.disabled = true;
+    try {
+      const payment = await request('/v1/payments', {method:'POST', headers:{'Content-Type':'application/json','Idempotency-Key':key()}, body:JSON.stringify({amount:Number(rawAmount), currency:form.currency.value, description:form.description.value})});
+      showResult(true, 'Payment created', payment); form.amount.value = ''; form.description.value = ''; await loadPayments();
+    } catch (error) { showResult(false, 'Create failed', error); }
+    finally { submit.disabled = false; }
+  });
+
+  paymentsEl.addEventListener('click', async event => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const action = button.dataset.action;
+    const card = button.closest('article');
+    let amount = 0;
+    if (action === 'refund') {
+      const input = card.querySelector('.refund input');
+      if (!input.reportValidity() || !/^\d+$/.test(input.value) || input.value === '0' || Number(input.value) > Number.MAX_SAFE_INTEGER) return;
+      amount = Number(input.value);
+    }
+    button.disabled = true;
+    try {
+      const payment = await request(`/v1/payments/${encodeURIComponent(button.dataset.id)}/actions/${action}`, {method:'POST', headers:{'Content-Type':'application/json','Idempotency-Key':key()}, body:JSON.stringify(amount ? {amount} : {})});
+      showResult(true, `${action[0].toUpperCase() + action.slice(1)} succeeded`, payment); await loadPayments();
+    } catch (error) { showResult(false, `${action[0].toUpperCase() + action.slice(1)} failed`, error); await loadPayments(); }
+    finally { if (button.isConnected) button.disabled = false; }
+  });
+
+  refreshEl.addEventListener('click', () => loadPayments());
+  moreEl.addEventListener('click', () => loadPayments(true));
+  document.querySelector('#token-form').addEventListener('submit', event => {
+    event.preventDefault();
+    tokenEl.value = tokenEl.value.trim();
+    try { sessionStorage.setItem('apiToken', tokenEl.value); } catch (_) {}
+    loadPayments();
+  });
+  loadPayments();
+})();
+</script>
+</body>
+</html>
